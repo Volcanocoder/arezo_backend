@@ -6,14 +6,19 @@ use App\Http\Controllers\Controller;
 use App\Models\Donation;
 use App\Models\User;
 use App\Models\Wish;
+use Illuminate\Http\Request;
 use Carbon\Carbon;
 
 class DashboardStatsController extends Controller
 {
-    public function index()
+    public function index(Request $request)
     {
+        $days = (int) $request->validate([
+            'days' => ['nullable', 'integer', 'in:7,14,30'],
+        ])['days'] ?? 7;
+
         $today = Carbon::today();
-        $startDate = $today->copy()->subDays(6);
+        $startDate = $today->copy()->subDays($days - 1);
 
         // آمار کلی آرزوها
         $wishCounts = Wish::query()
@@ -36,7 +41,7 @@ class DashboardStatsController extends Controller
             ->pluck('aggregate', 'day');
 
         // ساخت روزهای نمودار، حتی برای روزهایی که فعالیت نداشته‌اند
-        $dailyActivity = collect(range(6, 0))
+        $dailyActivity = collect(range($days - 1, 0))
             ->map(function ($daysAgo) use (
                 $today,
                 $dailyUsers,
@@ -86,6 +91,36 @@ class DashboardStatsController extends Controller
             ],
 
             'daily_activity' => $dailyActivity,
+
+            'categories' => Wish::query()
+                ->selectRaw('category, COUNT(*) as aggregate')
+                ->groupBy('category')
+                ->orderByDesc('aggregate')
+                ->limit(8)
+                ->get()
+                ->map(fn ($row) => [
+                    'name' => $row->category,
+                    'count' => (int) $row->aggregate,
+                ]),
+
+            'recent_wishes' => Wish::query()
+                ->latest('id')
+                ->limit(6)
+                ->get(['id', 'title', 'category', 'status', 'requested_amount', 'applicant_name', 'created_at']),
+
+            'recent_users' => User::query()
+                ->latest('id')
+                ->limit(5)
+                ->get(['id', 'name', 'mobile', 'role', 'created_at']),
+
+            'oldest_pending_at' => Wish::query()
+                ->where('status', 'pending')
+                ->min('created_at'),
+
+            'blog' => [
+                'published' => \App\Models\Post::query()->published()->count(),
+                'drafts' => \App\Models\Post::query()->where('status', 'draft')->count(),
+            ],
         ]);
     }
 }

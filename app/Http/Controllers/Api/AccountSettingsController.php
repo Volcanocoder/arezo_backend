@@ -6,6 +6,8 @@ use App\Http\Controllers\Controller;
 use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
 
 class AccountSettingsController extends Controller
@@ -128,6 +130,60 @@ class AccountSettingsController extends Controller
     }
 
     /**
+     * آپلود یا جایگزینی تصویر پروفایل
+     */
+    public function updateAvatar(Request $request)
+    {
+        $request->validate([
+            'avatar' => ['required', 'file', 'image', 'mimes:jpg,jpeg,png,webp', 'max:2048', 'dimensions:min_width=64,min_height=64,max_width=6000,max_height=6000'],
+        ], [
+            'avatar.required' => 'یک تصویر انتخاب کن.',
+            'avatar.image' => 'فایل انتخاب‌شده تصویر نیست.',
+            'avatar.mimes' => 'فقط تصویر JPG، PNG یا WEBP قابل قبول است.',
+            'avatar.max' => 'حجم تصویر باید کمتر از ۲ مگابایت باشد.',
+            'avatar.dimensions' => 'ابعاد تصویر مناسب نیست (حداقل ۶۴ پیکسل).',
+        ]);
+
+        $user = $request->user();
+        $old = $user->avatar_path;
+
+        // نام فایل تصادفی است و نام اصلی کاربر هرگز استفاده نمی‌شود.
+        $path = $request->file('avatar')->storeAs(
+            'avatars',
+            Str::random(40).'.'.$request->file('avatar')->guessExtension(),
+            'local',
+        );
+
+        $user->avatar_path = $path;
+        $user->save();
+
+        if ($old && $old !== $path) {
+            Storage::disk('local')->delete($old);
+        }
+
+        return response()->json([
+            'message' => 'تصویر پروفایل ذخیره شد.',
+            'avatar_url' => $user->avatarUrl(),
+        ]);
+    }
+
+    /**
+     * حذف تصویر پروفایل
+     */
+    public function deleteAvatar(Request $request)
+    {
+        $user = $request->user();
+
+        if ($user->avatar_path) {
+            Storage::disk('local')->delete($user->avatar_path);
+            $user->avatar_path = null;
+            $user->save();
+        }
+
+        return response()->json(['message' => 'تصویر پروفایل حذف شد.', 'avatar_url' => null]);
+    }
+
+    /**
      * اطلاعات مجاز برای نمایش در فرانت‌اند
      */
     private function userData(User $user): array
@@ -139,6 +195,7 @@ class AccountSettingsController extends Controller
             'email' => $user->email,
             'city' => $user->city,
             'bio' => $user->bio,
+            'avatar_url' => $user->avatarUrl(),
             'preferences' => [
                 'wish_updates' => (bool) $user->wish_updates,
                 'new_messages' => (bool) $user->new_messages,

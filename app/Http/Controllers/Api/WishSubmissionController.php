@@ -18,15 +18,9 @@ class WishSubmissionController extends Controller
 
             'category' => [
                 'required',
-                Rule::in([
-                    'تحصیلی',
-                    'درمانی',
-                    'وسایل ضروری',
-                    'آموزشی',
-                    'تجربه و تفریح',
-                    'خانواده',
-                    'سایر',
-                ]),
+                Rule::exists('categories', 'name')
+                    ->where('type', 'wish')
+                    ->where('is_active', true),
             ],
 
             'description' => ['required', 'string', 'max:500'],

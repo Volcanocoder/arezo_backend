@@ -42,13 +42,7 @@ class AuthController extends Controller
 
         return response()->json([
             'message' => 'ثبت‌نام با موفقیت انجام شد.',
-            'user' => $user->only([
-                'id',
-                'name',
-                'email',
-                'mobile',
-                'role',
-            ]),
+            'user' => $user->publicData(),
         ], 201);
     }
 
@@ -77,32 +71,28 @@ class AuthController extends Controller
             ], 422);
         }
 
+        if ($user->isSuspended()) {
+            return response()->json([
+                'message' => 'حساب شما تعلیق شده است. برای اطلاعات بیشتر با پشتیبانی تماس بگیرید.',
+            ], 403);
+        }
+
         Auth::guard('web')->login($user);
 
         $request->session()->regenerate();
 
+        $user->forceFill(['last_login_at' => now()])->save();
+
         return response()->json([
             'message' => 'ورود با موفقیت انجام شد.',
-            'user' => $user->only([
-                'id',
-                'name',
-                'email',
-                'mobile',
-                'role',
-            ]),
+            'user' => $user->publicData(),
         ]);
     }
 
     public function me(Request $request)
     {
         return response()->json([
-            'user' => $request->user()->only([
-                'id',
-                'name',
-                'email',
-                'mobile',
-                'role',
-            ]),
+            'user' => $request->user()->publicData(),
         ]);
     }
 

@@ -13,6 +13,7 @@ class Donation extends Model
         'amount',
         'status',
         'gateway',
+        'payment_gateway_id',
         'gateway_authority',
         'gateway_reference',
         'paid_at',

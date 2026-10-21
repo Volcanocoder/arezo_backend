@@ -19,17 +19,61 @@ class WishController extends Controller
                 'sometimes',
                 Rule::in(['pending', 'approved', 'rejected', 'needs_info']),
             ],
+            'q' => ['sometimes', 'nullable', 'string', 'max:100'],
+            'category' => ['sometimes', 'nullable', 'string', 'max:80'],
+            'urgency' => ['sometimes', 'nullable', Rule::in(['normal', 'important', 'urgent'])],
+            'sort' => ['sometimes', 'nullable', Rule::in(['newest', 'oldest', 'amount_desc', 'amount_asc', 'urgent'])],
         ]);
 
-        $query = Wish::query()->latest();
+        $query = Wish::query();
 
-        if (isset($filters['status'])) {
+        if (! empty($filters['status'])) {
             $query->where('status', $filters['status']);
         }
 
-        return response()->json(
-            $query->paginate(15)
-        );
+        if (! empty($filters['category'])) {
+            $query->where('category', $filters['category']);
+        }
+
+        if (! empty($filters['urgency'])) {
+            $query->where('urgency', $filters['urgency']);
+        }
+
+        if (! empty($filters['q'])) {
+            $like = '%'.str_replace(['%', '_'], ['\\%', '\\_'], trim($filters['q'])).'%';
+
+            $query->where(function ($sub) use ($like) {
+                $sub->where('title', 'like', $like)
+                    ->orWhere('applicant_name', 'like', $like)
+                    ->orWhere('applicant_mobile', 'like', $like)
+                    ->orWhere('city', 'like', $like);
+            });
+        }
+
+        match ($filters['sort'] ?? 'newest') {
+            'oldest' => $query->orderBy('id'),
+            'amount_desc' => $query->orderByDesc('requested_amount')->orderByDesc('id'),
+            'amount_asc' => $query->orderBy('requested_amount')->orderByDesc('id'),
+            'urgent' => $query->orderByRaw("CASE urgency WHEN 'urgent' THEN 0 WHEN 'important' THEN 1 ELSE 2 END")->orderByDesc('id'),
+            default => $query->orderByDesc('id'),
+        };
+
+        $counts = Wish::query()
+            ->selectRaw('status, COUNT(*) as aggregate')
+            ->groupBy('status')
+            ->pluck('aggregate', 'status');
+
+        $page = $query->paginate(15)->withQueryString();
+
+        return response()->json($page->toArray() + [
+            'counts' => [
+                'all' => (int) $counts->sum(),
+                'pending' => (int) ($counts['pending'] ?? 0),
+                'approved' => (int) ($counts['approved'] ?? 0),
+                'rejected' => (int) ($counts['rejected'] ?? 0),
+                'needs_info' => (int) ($counts['needs_info'] ?? 0),
+            ],
+        ]);
     }
 
     /**
@@ -74,7 +118,26 @@ class WishController extends Controller
             ? null
             : now();
 
+        $statusChanged = $wish->isDirty('status');
+
         $wish->save();
+
+        // نتیجه بررسی برای صاحب آرزو اعلان می‌شود.
+        if ($statusChanged && $wish->user_id && in_array($wish->status, ['approved', 'rejected', 'needs_info'], true)) {
+            [$title, $body, $type] = match ($wish->status) {
+                'approved' => ['آرزوی تو تأیید شد', "«{$wish->title}» تأیید شد و حالا در سایت دیده می‌شود.", 'success'],
+                'rejected' => ['آرزوی تو رد شد', "«{$wish->title}» رد شد. ".($wish->review_note ?: ''), 'warning'],
+                default => ['اطلاعات بیشتری لازم است', "برای «{$wish->title}» تکمیل اطلاعات لازم است. ".($wish->review_note ?: ''), 'warning'],
+            };
+
+            \App\Models\UserNotification::notify(
+                $wish->user_id,
+                $title,
+                trim($body),
+                $type,
+                '/dashboard/my-wishes',
+            );
+        }
 
         return response()->json([
             'message' => match ($wish->status) {

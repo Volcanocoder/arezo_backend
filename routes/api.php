@@ -4,8 +4,22 @@ use App\Http\Controllers\Api\AccountSettingsController;
 use App\Http\Controllers\Api\Admin\WishController;
 use App\Http\Controllers\Api\Admin\WishDocumentController;
 use App\Http\Controllers\Api\AuthController;
+use App\Http\Controllers\Api\BlogController;
+use App\Http\Controllers\Api\CategoryController;
+use App\Http\Controllers\Api\MediaController;
+use App\Http\Controllers\Api\NotificationController;
+use App\Http\Controllers\Api\Admin\BlogImageController;
+use App\Http\Controllers\Api\Admin\CategoryController as AdminCategoryController;
+use App\Http\Controllers\Api\Admin\GatewayController;
+use App\Http\Controllers\Api\PaymentController;
+use App\Http\Controllers\Api\ContactController;
+use App\Http\Controllers\Api\Admin\TransactionController;
+use App\Http\Controllers\Api\Admin\ContactMessageController;
+use App\Http\Controllers\Api\Admin\NotificationController as AdminNotificationController;
+use App\Http\Controllers\Api\Admin\PostController;
 use App\Http\Controllers\Api\ConversationController;
 use App\Http\Controllers\Api\MessageController;
+use App\Http\Controllers\Api\PasswordResetController;
 use App\Http\Controllers\Api\WishSubmissionController;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
@@ -20,10 +34,6 @@ Route::get('/health', function () {
     ]);
 });
 
-Route::get('/user', function (Request $request) {
-    return $request->user();
-})->middleware('auth:sanctum');
-
 // ثبت‌نام و ورود
 Route::prefix('auth')->group(function () {
     Route::post('/register', [AuthController::class, 'register'])
@@ -32,21 +42,18 @@ Route::prefix('auth')->group(function () {
     Route::post('/login', [AuthController::class, 'login'])
         ->middleware('throttle:5,1');
 
+    // بازیابی رمز با کد پیامکی
+    Route::post('/password/forgot', [PasswordResetController::class, 'forgot'])
+        ->middleware('throttle:5,1');
+
+    Route::post('/password/reset', [PasswordResetController::class, 'reset'])
+        ->middleware('throttle:10,1');
+
     // مسیرهای مخصوص کاربران واردشده
     Route::middleware('auth:sanctum')->group(function () {
         Route::get('/me', [AuthController::class, 'me']);
         Route::post('/logout', [AuthController::class, 'logout']);
     });
-
-    // مسیر آزمایشی دسترسی مدیر (آدرس: /api/auth/admin-test)
-    Route::middleware(['auth:sanctum', 'role:admin,super_admin'])
-        ->get('/admin-test', function (Request $request) {
-            return response()->json([
-                'success' => true,
-                'message' => 'دسترسی مدیریتی مجاز است.',
-                'role' => $request->user()->role,
-            ]);
-        });
 });
 
 // تنظیمات حساب؛ خارج از پیشوند auth و فقط برای کاربر واردشده
@@ -64,6 +71,10 @@ Route::middleware('auth:sanctum')
             AccountSettingsController::class,
             'updatePreferences',
         ]);
+
+        Route::post('/avatar', [AccountSettingsController::class, 'updateAvatar'])
+            ->middleware('throttle:10,1');
+        Route::delete('/avatar', [AccountSettingsController::class, 'deleteAvatar']);
 
         Route::put('/password', [
             AccountSettingsController::class,
@@ -94,10 +105,86 @@ Route::middleware(['auth:sanctum', 'role:admin,super_admin'])
         );
         Route::get('/dashboard/stats', [DashboardStatsController::class, 'index']);
 
+        // مدیریت وبلاگ
+        Route::get('/blog/posts', [PostController::class, 'index']);
+        Route::post('/blog/posts', [PostController::class, 'store']);
+        Route::post('/blog/preview', [PostController::class, 'preview']);
+        Route::get('/blog/posts/{post}', [PostController::class, 'show'])->whereNumber('post');
+        Route::put('/blog/posts/{post}', [PostController::class, 'update'])->whereNumber('post');
+        Route::delete('/blog/posts/{post}', [PostController::class, 'destroy'])->whereNumber('post');
+
+
         Route::get('/users', [UserController::class, 'index']);
+        Route::get('/users/export', [UserController::class, 'export']);
+        Route::get('/users/{user}', [UserController::class, 'show'])->whereNumber('user');
+        Route::post('/users/{user}/suspend', [UserController::class, 'suspend'])->whereNumber('user');
+        Route::post('/users/{user}/unsuspend', [UserController::class, 'unsuspend'])->whereNumber('user');
+
+        // دسته‌بندی‌ها
+        Route::get('/categories', [AdminCategoryController::class, 'index']);
+        Route::post('/categories', [AdminCategoryController::class, 'store']);
+        Route::put('/categories/reorder', [AdminCategoryController::class, 'reorder']);
+        Route::put('/categories/{category}', [AdminCategoryController::class, 'update'])->whereNumber('category');
+        Route::delete('/categories/{category}', [AdminCategoryController::class, 'destroy'])->whereNumber('category');
+
+        // اعلان‌ها و اطلاعیه‌ها
+        Route::get('/notifications', [AdminNotificationController::class, 'index']);
+        Route::post('/notifications', [AdminNotificationController::class, 'store'])->middleware('throttle:30,1');
+        Route::delete('/notifications/{notification}', [AdminNotificationController::class, 'destroy'])->whereNumber('notification');
+
+        // آپلود تصویر وبلاگ
+        Route::post('/blog/images', [BlogImageController::class, 'store'])->middleware('throttle:30,1');
+        // گزارش تراکنش‌ها
+        Route::get('/transactions', [TransactionController::class, 'index']);
+        Route::get('/transactions/export', [TransactionController::class, 'export']);
+
+        // پیام‌های فرم تماس
+        Route::get('/contact-messages', [ContactMessageController::class, 'index']);
+        Route::post('/contact-messages/{message}/read', [ContactMessageController::class, 'markRead'])->whereNumber('message');
+        Route::delete('/contact-messages/{message}', [ContactMessageController::class, 'destroy'])->whereNumber('message');
+
+        // درگاه‌های پرداخت؛ فقط مدیر ارشد
+        Route::middleware('role:super_admin')->prefix('gateways')->group(function () {
+            Route::get('/', [GatewayController::class, 'index']);
+            Route::post('/', [GatewayController::class, 'store']);
+            Route::put('/{gateway}', [GatewayController::class, 'update'])->whereNumber('gateway');
+            Route::delete('/{gateway}', [GatewayController::class, 'destroy'])->whereNumber('gateway');
+        });
+
         Route::patch('/users/{user}/role', [UserController::class, 'updateRole']);
         Route::delete('/users/{user}', [UserController::class, 'destroy']);
     });
+
+// فرم تماس با ما
+Route::post('/contact', [ContactController::class, 'store'])->middleware('throttle:5,1');
+
+// پرداخت آنلاین
+Route::get('/payments/gateways', [PaymentController::class, 'gateways']);
+Route::post('/wishes/{wish}/donate', [PaymentController::class, 'start'])
+    ->whereNumber('wish')->middleware('throttle:20,1');
+Route::get('/payments/callback', [PaymentController::class, 'callback']);
+
+// دسته‌بندی‌های فعال (آرزو یا وبلاگ)
+Route::get('/categories', [CategoryController::class, 'index']);
+
+// تصویرهای وبلاگ
+Route::get('/media/blog/{file}', [MediaController::class, 'blog']);
+Route::get('/media/avatar/{file}', [MediaController::class, 'avatar']);
+
+// اعلان‌های کاربر واردشده
+Route::middleware('auth:sanctum')
+    ->prefix('notifications')
+    ->group(function () {
+        Route::get('/', [NotificationController::class, 'index']);
+        Route::get('/unread-count', [NotificationController::class, 'count']);
+        Route::post('/read-all', [NotificationController::class, 'markAllRead']);
+        Route::post('/{notification}/read', [NotificationController::class, 'markRead'])->whereNumber('notification');
+    });
+
+// وبلاگ عمومی؛ فقط مقاله‌های منتشرشده
+Route::get('/blog/posts', [BlogController::class, 'index']);
+Route::get('/blog/sitemap', [BlogController::class, 'sitemap']);
+Route::get('/blog/posts/{slug}', [BlogController::class, 'show']);
 
 // فهرست عمومی آرزوهای تأییدشده؛ بدون افشای اطلاعات خصوصی متقاضی
 Route::get('/wishes', function () {

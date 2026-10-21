@@ -35,6 +35,8 @@ class User extends Authenticatable
 {
     return [
         'email_verified_at' => 'datetime',
+        'suspended_at' => 'datetime',
+        'last_login_at' => 'datetime',
         'password' => 'hashed',
         'wish_updates' => 'boolean',
         'new_messages' => 'boolean',
@@ -46,6 +48,37 @@ class User extends Authenticatable
     public function isAdmin(): bool
     {
         return in_array($this->role, ['admin', 'super_admin'], true);
+    }
+
+    public function wishes(): \Illuminate\Database\Eloquent\Relations\HasMany
+    {
+        return $this->hasMany(Wish::class);
+    }
+
+    public function donations(): \Illuminate\Database\Eloquent\Relations\HasMany
+    {
+        return $this->hasMany(Donation::class);
+    }
+
+    public function isSuspended(): bool
+    {
+        return $this->suspended_at !== null;
+    }
+
+    /** آدرس عمومی تصویر پروفایل؛ بدون نیاز به storage:link. */
+    public function avatarUrl(): ?string
+    {
+        return $this->avatar_path
+            ? url('/api/media/avatar/'.basename($this->avatar_path))
+            : null;
+    }
+
+    /** فیلدهای امن کاربر برای پاسخ‌های احراز هویت. */
+    public function publicData(): array
+    {
+        return $this->only(['id', 'name', 'email', 'mobile', 'role']) + [
+            'avatar_url' => $this->avatarUrl(),
+        ];
     }
 
     public function isSuperAdmin(): bool
