@@ -18,6 +18,9 @@ use App\Http\Controllers\Api\Admin\ContactMessageController;
 use App\Http\Controllers\Api\Admin\NotificationController as AdminNotificationController;
 use App\Http\Controllers\Api\Admin\PostController;
 use App\Http\Controllers\Api\ConversationController;
+use App\Http\Controllers\Api\KindnessController;
+use App\Http\Controllers\Api\Admin\KindnessController as AdminKindnessController;
+use App\Http\Controllers\Api\Admin\LeaderboardController;
 use App\Http\Controllers\Api\MessageController;
 use App\Http\Controllers\Api\PasswordResetController;
 use App\Http\Controllers\Api\WishSubmissionController;
@@ -104,6 +107,15 @@ Route::middleware(['auth:sanctum', 'role:admin,super_admin'])
             [WishDocumentController::class, 'show']
         );
         Route::get('/dashboard/stats', [DashboardStatsController::class, 'index']);
+
+        // دیوار مهربانی
+        Route::get('/kindness/items', [AdminKindnessController::class, 'items']);
+        Route::get('/kindness/items/{item}', [AdminKindnessController::class, 'showItem'])->whereNumber('item');
+        Route::get('/kindness/items/{item}/image', [AdminKindnessController::class, 'itemImage'])->whereNumber('item');
+        Route::patch('/kindness/items/{item}/status', [AdminKindnessController::class, 'updateItemStatus'])->whereNumber('item');
+        Route::get('/kindness/requests', [AdminKindnessController::class, 'requests']);
+        Route::patch('/kindness/requests/{kindnessRequest}/status', [AdminKindnessController::class, 'updateRequestStatus'])->whereNumber('kindnessRequest');
+        Route::get('/leaderboard', [LeaderboardController::class, 'index']);
 
         // مدیریت وبلاگ
         Route::get('/blog/posts', [PostController::class, 'index']);
@@ -315,6 +327,20 @@ Route::get('/wishes/{wish}/image', function (\App\Models\Wish $wish) {
         'Cache-Control' => 'public, max-age=3600',
     ]);
 })->whereNumber('wish');
+
+// دیوار مهربانی (عمومی)
+Route::get('/kindness', [KindnessController::class, 'index']);
+Route::get('/kindness/{item}', [KindnessController::class, 'show'])->whereNumber('item');
+Route::get('/kindness/{item}/image', [KindnessController::class, 'image'])->whereNumber('item');
+
+// دیوار مهربانی (کاربر واردشده)
+Route::middleware('auth:sanctum')->group(function () {
+    Route::post('/kindness', [KindnessController::class, 'store'])->middleware('throttle:5,1');
+    Route::post('/kindness/{item}/requests', [KindnessController::class, 'requestItem'])
+        ->whereNumber('item')->middleware('throttle:10,1');
+    Route::get('/my/kindness/items', [KindnessController::class, 'myItems']);
+    Route::get('/my/kindness/requests', [KindnessController::class, 'myRequests']);
+});
 
 // ثبت آرزوی جدید؛ نیازمند ورود کاربر
 Route::post('/wishes', [WishSubmissionController::class, 'store'])
