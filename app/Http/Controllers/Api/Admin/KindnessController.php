@@ -6,6 +6,7 @@ use App\Http\Controllers\Api\KindnessController as PublicKindnessController;
 use App\Http\Controllers\Controller;
 use App\Models\KindnessItem;
 use App\Models\KindnessRequest;
+use App\Models\User;
 use App\Models\UserNotification;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -19,7 +20,10 @@ class KindnessController extends Controller
     public function items(Request $request)
     {
         $status = $request->query('status');
-        $query = KindnessItem::query()->with('user:id,name,mobile')->latest('id');
+        $query = KindnessItem::query()->with('user:id,name,mobile')->withCount([
+            'requests',
+            'requests as pending_requests_count' => fn ($q) => $q->where('status', 'pending'),
+        ])->latest('id');
 
         if (in_array($status, self::ITEM_STATUSES, true)) {
             $query->where('status', $status);
@@ -41,13 +45,30 @@ class KindnessController extends Controller
 
     public function showItem(KindnessItem $item)
     {
-        $item->load(['user:id,name,mobile', 'requests.user:id,name,mobile']);
+        $item->load(['user', 'requests.user']);
 
         return response()->json([
-            'data' => $this->itemPayload($item) + [
-                'requests' => $item->requests->map(fn (KindnessRequest $r) => $this->requestPayload($r, $item))->values(),
+            'data' => $this->itemPayload($item, true) + [
+                'requests' => $item->requests->sortByDesc('id')->map(fn (KindnessRequest $r) => $this->requestPayload($r, $item, true))->values(),
             ],
         ]);
+    }
+
+    /** ویرایش مشخصات آگهی توسط مدیر؛ وضعیت تغییر نمی‌کند و صاحب آگهی خبردار می‌شود. */
+    public function updateItem(Request $request, KindnessItem $item)
+    {
+        PublicKindnessController::applyEdit($request, $item);
+        $item->save();
+
+        UserNotification::notify(
+            $item->user_id,
+            'آگهی‌ات ویرایش شد',
+            "مدیر مشخصات آگهی «{$item->title}» را ویرایش کرد.",
+            'info',
+            '/dashboard/kindness',
+        );
+
+        return response()->json(['message' => 'آگهی ویرایش شد.', 'data' => $this->itemPayload($item->fresh('user'), true)]);
     }
 
     public function itemImage(KindnessItem $item)
@@ -202,7 +223,31 @@ class KindnessController extends Controller
         ]);
     }
 
-    private function itemPayload(KindnessItem $i): array
+    /** مشخصات آگهی‌دهنده/درخواست‌کننده؛ با $full پروفایل و سابقه مهربانی هم می‌آید. */
+    private function person(?User $u, bool $full = false): ?array
+    {
+        if (! $u) {
+            return null;
+        }
+
+        $base = ['id' => $u->id, 'name' => $u->name, 'mobile' => $u->mobile];
+
+        if (! $full) {
+            return $base;
+        }
+
+        return $base + [
+            'email' => $u->email,
+            'city' => $u->city,
+            'bio' => $u->bio,
+            'joined_at' => $u->created_at,
+            'items_count' => KindnessItem::where('user_id', $u->id)->count(),
+            'given_count' => KindnessItem::where('user_id', $u->id)->where('status', 'given')->count(),
+            'received_count' => KindnessRequest::where('user_id', $u->id)->where('status', 'completed')->count(),
+        ];
+    }
+
+    private function itemPayload(KindnessItem $i, bool $full = false): array
     {
         return [
             'id' => $i->id,
@@ -216,12 +261,15 @@ class KindnessController extends Controller
             'review_note' => $i->review_note,
             'has_image' => (bool) $i->image_path,
             'created_at' => $i->created_at,
-            'owner' => $i->user ? ['id' => $i->user->id, 'name' => $i->user->name, 'mobile' => $i->user->mobile] : null,
+            'reviewed_at' => $i->reviewed_at,
+            'requests_count' => $i->requests_count ?? null,
+            'pending_requests_count' => $i->pending_requests_count ?? null,
+            'owner' => $this->person($i->user, $full),
         ];
     }
 
     /** مدیر شماره هر دو طرف را برای هماهنگی تحویل می‌بیند. */
-    private function requestPayload(KindnessRequest $r, ?KindnessItem $item): array
+    private function requestPayload(KindnessRequest $r, ?KindnessItem $item, bool $full = false): array
     {
         return [
             'id' => $r->id,
@@ -231,8 +279,8 @@ class KindnessController extends Controller
             'created_at' => $r->created_at,
             'completed_at' => $r->completed_at,
             'item' => $item ? ['id' => $item->id, 'title' => $item->title, 'status' => $item->status] : null,
-            'owner' => $item?->user ? ['id' => $item->user->id, 'name' => $item->user->name, 'mobile' => $item->user->mobile] : null,
-            'requester' => $r->user ? ['id' => $r->user->id, 'name' => $r->user->name, 'mobile' => $r->user->mobile] : null,
+            'owner' => $this->person($item?->user),
+            'requester' => $this->person($r->user, $full),
         ];
     }
 }

@@ -54,14 +54,7 @@ class KindnessController extends Controller
     /** ثبت آگهی؛ پس از تأیید مدیر نمایش داده می‌شود. */
     public function store(Request $request)
     {
-        $data = $request->validate([
-            'title' => ['required', 'string', 'max:150'],
-            'category' => ['required', Rule::in(KindnessItem::CATEGORIES)],
-            'description' => ['required', 'string', 'max:1500'],
-            'condition' => ['required', Rule::in(array_keys(KindnessItem::CONDITIONS))],
-            'city' => ['required', 'string', 'max:120'],
-            'image' => ['nullable', 'image', 'mimes:jpg,jpeg,png,webp', 'max:3072'],
-        ]);
+        $data = $request->validate(self::rules());
 
         $path = $request->hasFile('image')
             ? $request->file('image')->store('kindness/images', 'local')
@@ -81,7 +74,7 @@ class KindnessController extends Controller
         KindnessItem::notifyAdmins(
             'آگهی تازه در دیوار مهربانی',
             "آگهی «{$item->title}» در انتظار بررسی است.",
-            '/admin/kindness',
+            "/admin/kindness/{$item->id}",
         );
 
         return response()->json([
@@ -124,6 +117,87 @@ class KindnessController extends Controller
             'message' => 'درخواستت ثبت شد و پس از بررسی مدیر خبرت می‌کنیم.',
             'data' => ['id' => $req->id, 'status' => $req->status],
         ], 201);
+    }
+
+    /** قوانین مشترک ثبت و ویرایش آگهی. */
+    public static function rules(): array
+    {
+        return [
+            'title' => ['required', 'string', 'max:150'],
+            'category' => ['required', Rule::in(KindnessItem::CATEGORIES)],
+            'description' => ['required', 'string', 'max:1500'],
+            'condition' => ['required', Rule::in(array_keys(KindnessItem::CONDITIONS))],
+            'city' => ['required', 'string', 'max:120'],
+            'image' => ['nullable', 'image', 'mimes:jpg,jpeg,png,webp', 'max:3072'],
+            'remove_image' => ['nullable', 'boolean'],
+        ];
+    }
+
+    /** اعتبارسنجی و اعمال ویرایش فیلدها و تصویر (بدون تغییر وضعیت)؛ مشترک بین کاربر و مدیر. */
+    public static function applyEdit(Request $request, KindnessItem $item): void
+    {
+        $data = $request->validate(self::rules());
+        $disk = Storage::disk('local');
+        $path = $item->image_path;
+
+        if ($request->hasFile('image')) {
+            $new = $request->file('image')->store('kindness/images', 'local');
+            if ($path) {
+                $disk->delete($path);
+            }
+            $path = $new;
+        } elseif ($request->boolean('remove_image') && $path) {
+            $disk->delete($path);
+            $path = null;
+        }
+
+        $item->fill([
+            'title' => $data['title'],
+            'category' => $data['category'],
+            'description' => $data['description'],
+            'condition' => $data['condition'],
+            'city' => $data['city'],
+            'image_path' => $path,
+        ]);
+    }
+
+    /** نمایش آگهی خود کاربر (برای فرم ویرایش). */
+    public function myItem(Request $request, KindnessItem $item)
+    {
+        abort_unless($item->user_id === $request->user()->id, 404);
+
+        return response()->json(['data' => $this->ownerPayload($item)]);
+    }
+
+    public function myItemImage(Request $request, KindnessItem $item)
+    {
+        abort_unless($item->user_id === $request->user()->id, 404);
+
+        return self::imageResponse($item);
+    }
+
+    /** ویرایش آگهی توسط صاحبش؛ آگهی دوباره برای بررسی مدیر می‌رود. */
+    public function update(Request $request, KindnessItem $item)
+    {
+        abort_unless($item->user_id === $request->user()->id, 404);
+
+        if (! in_array($item->status, ['pending', 'approved', 'rejected'], true)) {
+            return response()->json(['message' => 'آگهی رزروشده یا تحویل‌شده قابل ویرایش نیست.'], 422);
+        }
+
+        self::applyEdit($request, $item);
+        $item->fill(['status' => 'pending', 'review_note' => null, 'reviewed_at' => null])->save();
+
+        KindnessItem::notifyAdmins(
+            'آگهی ویرایش شد',
+            "آگهی «{$item->title}» ویرایش شد و دوباره در انتظار بررسی است.",
+            "/admin/kindness/{$item->id}",
+        );
+
+        return response()->json([
+            'message' => 'تغییرات ثبت شد و آگهی دوباره پس از تأیید مدیر نمایش داده می‌شود.',
+            'data' => $this->ownerPayload($item),
+        ]);
     }
 
     public function myItems(Request $request)
@@ -179,9 +253,11 @@ class KindnessController extends Controller
 
     private function ownerPayload(KindnessItem $i): array
     {
-        return $this->publicPayload($i) + [
+        return array_merge($this->publicPayload($i), [
+            // تصویر آگهی در انتظار/ردشده فقط برای صاحبش در دسترس است.
+            'image_url' => $i->image_path ? url('/api/my/kindness/items/'.$i->id.'/image') : null,
             'review_note' => $i->review_note,
-        ];
+        ]);
     }
 
     /** پاسخ فایل تصویر آگهی (فقط تصویر). */

@@ -51,7 +51,7 @@ class KindnessWallTest extends TestCase
         $id = $this->actingAs($owner)->postJson('/api/kindness', $this->itemPayload())
             ->assertCreated()->json('data.id');
 
-        $this->assertDatabaseHas('user_notifications', ['user_id' => $admin->id, 'link' => '/admin/kindness']);
+        $this->assertDatabaseHas('user_notifications', ['user_id' => $admin->id, 'link' => "/admin/kindness/{$id}"]);
         $this->getJson('/api/kindness')->assertOk()->assertJsonCount(0, 'data');
         $this->getJson("/api/kindness/{$id}")->assertNotFound();
 
@@ -149,5 +149,37 @@ class KindnessWallTest extends TestCase
         $this->assertSame(90000, $res->json('data.0.total_amount'));
         $this->assertSame(5000, $res->json('data.1.total_amount'));
         $this->assertSame(95000, $res->json('totals.total_amount'));
+    }
+
+    public function test_owner_edit_resets_to_pending_and_blocks_others_and_reserved(): void
+    {
+        $admin = $this->user('admin');
+        $owner = $this->user();
+        $other = $this->user();
+        $item = $this->item($owner);
+
+        $this->actingAs($other)->postJson("/api/my/kindness/items/{$item->id}", $this->itemPayload())->assertNotFound();
+
+        $this->actingAs($owner)->postJson("/api/my/kindness/items/{$item->id}", $this->itemPayload(['title' => 'کتری جدید']))
+            ->assertOk()->assertJsonPath('data.status', 'pending')->assertJsonPath('data.title', 'کتری جدید');
+        $this->assertDatabaseHas('user_notifications', ['user_id' => $admin->id, 'link' => "/admin/kindness/{$item->id}"]);
+
+        $item->update(['status' => 'reserved']);
+        $this->actingAs($owner)->postJson("/api/my/kindness/items/{$item->id}", $this->itemPayload())->assertStatus(422);
+    }
+
+    public function test_admin_edit_keeps_status_notifies_owner_and_show_has_full_profiles(): void
+    {
+        $admin = $this->user('admin');
+        $owner = $this->user();
+        $item = $this->item($owner);
+
+        $this->actingAs($this->user())->postJson("/api/admin/kindness/items/{$item->id}", $this->itemPayload())->assertForbidden();
+
+        $this->actingAs($admin)->postJson("/api/admin/kindness/items/{$item->id}", $this->itemPayload(['city' => 'شیراز']))
+            ->assertOk()->assertJsonPath('data.status', 'approved')->assertJsonPath('data.city', 'شیراز');
+        $this->assertDatabaseHas('user_notifications', ['user_id' => $owner->id, 'link' => '/dashboard/kindness']);
+
+        $this->getJson("/api/admin/kindness/items/{$item->id}")->assertOk()->assertJsonPath('data.owner.email', $owner->email);
     }
 }

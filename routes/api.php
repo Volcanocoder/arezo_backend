@@ -112,6 +112,7 @@ Route::middleware(['auth:sanctum', 'role:admin,super_admin'])
         Route::get('/kindness/items', [AdminKindnessController::class, 'items']);
         Route::get('/kindness/items/{item}', [AdminKindnessController::class, 'showItem'])->whereNumber('item');
         Route::get('/kindness/items/{item}/image', [AdminKindnessController::class, 'itemImage'])->whereNumber('item');
+        Route::post('/kindness/items/{item}', [AdminKindnessController::class, 'updateItem'])->whereNumber('item');
         Route::patch('/kindness/items/{item}/status', [AdminKindnessController::class, 'updateItemStatus'])->whereNumber('item');
         Route::get('/kindness/requests', [AdminKindnessController::class, 'requests']);
         Route::patch('/kindness/requests/{kindnessRequest}/status', [AdminKindnessController::class, 'updateRequestStatus'])->whereNumber('kindnessRequest');
@@ -339,6 +340,10 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/kindness/{item}/requests', [KindnessController::class, 'requestItem'])
         ->whereNumber('item')->middleware('throttle:10,1');
     Route::get('/my/kindness/items', [KindnessController::class, 'myItems']);
+    Route::get('/my/kindness/items/{item}', [KindnessController::class, 'myItem'])->whereNumber('item');
+    Route::get('/my/kindness/items/{item}/image', [KindnessController::class, 'myItemImage'])->whereNumber('item');
+    Route::post('/my/kindness/items/{item}', [KindnessController::class, 'update'])
+        ->whereNumber('item')->middleware('throttle:10,1');
     Route::get('/my/kindness/requests', [KindnessController::class, 'myRequests']);
 });
 
