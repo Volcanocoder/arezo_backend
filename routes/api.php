@@ -342,6 +342,8 @@ Route::middleware('auth:sanctum')
                 ->latest()
                 ->paginate(10);
         });
+        Route::get('/wishes/{wish}/edit', [WishSubmissionController::class, 'edit']);
+        Route::post('/wishes/{wish}', [WishSubmissionController::class, 'update'])->middleware('throttle:10,1');
     });
 
 // مسیرهای گفتگو؛ فقط کاربران واردشده
